@@ -27,8 +27,10 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/remote/fileshare"
 	"github.com/wavetermdev/waveterm/pkg/schema"
 	"github.com/wavetermdev/waveterm/pkg/service"
+	"github.com/wavetermdev/waveterm/pkg/tts"
 	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
 	"github.com/wavetermdev/waveterm/pkg/wavebase"
+	"github.com/wavetermdev/waveterm/pkg/whispercpp"
 	"github.com/wavetermdev/waveterm/pkg/wshrpc"
 	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
 	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshserver"
@@ -448,6 +450,20 @@ const schemaPrefix = "/schema/"
 func RunWebServer(listener net.Listener) {
 	gr := mux.NewRouter()
 
+	// Initialize Whisper service once
+	if err := whispercpp.InitWhisperService(whispercpp.DefaultConfig()); err != nil {
+		log.Printf("Warning: Whisper service initialization failed: %v", err)
+	} else {
+		log.Printf("Whisper service initialized successfully")
+	}
+
+	// Initialize TTS service
+	if err := tts.InitTTSService(tts.DefaultConfig()); err != nil {
+		log.Printf("Warning: TTS service initialization failed: %v", err)
+	} else {
+		log.Printf("TTS service initialized successfully")
+	}
+
 	// Create separate routers for different timeout requirements
 	waveRouter := mux.NewRouter()
 	waveRouter.HandleFunc("/wave/stream-local-file", WebFnWrap(WebFnOpts{AllowCaching: true}, handleStreamLocalFile))
@@ -466,6 +482,11 @@ func RunWebServer(listener net.Listener) {
 
 	// Routes that should NOT have timeout handling (for streaming)
 	gr.HandleFunc("/api/post-chat-message", WebFnWrap(WebFnOpts{AllowCaching: false}, aiusechat.WaveAIPostMessageHandler))
+	// Whisper routes (no timeout: WebSocket streaming and STT)
+	gr.HandleFunc("/api/whisper/ws", whispercpp.WebSocketHandler)
+	gr.HandleFunc("/api/whisper/transcribe", WebFnWrap(WebFnOpts{JsonErrors: true, AllowCaching: false}, whispercpp.TranscribeHandler))
+	// TTS route
+	gr.HandleFunc("/api/tts/synthesize", tts.SynthesizeHandler)
 
 	// Other routes without timeout
 	gr.PathPrefix(schemaPrefix).Handler(http.StripPrefix(schemaPrefix, schema.GetSchemaHandler()))

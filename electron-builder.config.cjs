@@ -31,6 +31,28 @@ const config = {
         },
         "!node_modules", // We don't need electron-builder to package in Node modules as Vite has already bundled any code that our program is using.
     ],
+    extraResources: [
+        {
+            from: "third_party/whisper.cpp/models/",
+            to: "models/",
+            filter: ["**/*"],
+        },
+        {
+            from: "models/tts/",
+            to: "models/tts/",
+            filter: ["**/*.onnx", "**/*.json"],
+        },
+        {
+            from: "third_party/piper/build_go/pi/share/espeak-ng-data/",
+            to: "espeak-ng-data/",
+            filter: ["**/*"],
+        },
+        {
+            from: "bin/",
+            to: "bin/",
+            filter: ["piper*"],
+        },
+    ],
     directories: {
         output: "make",
     },
@@ -131,6 +153,19 @@ const config = {
             })
                 .filter((f) => f.isFile() && f.name.startsWith("wavesrv"))
                 .forEach((f) => fs.chmodSync(path.resolve(f.parentPath ?? f.path, f.name), 0o755)); // 0o755 corresponds to -rwxr-xr-x
+            
+            // Also set permissions for piper binary in resources
+            const resourcesBinDir = path.resolve(
+                context.appOutDir,
+                `${pkg.productName}.app/Contents/Resources/bin`
+            );
+            if (fs.existsSync(resourcesBinDir)) {
+                fs.readdirSync(resourcesBinDir, {
+                    withFileTypes: true,
+                })
+                    .filter((f) => f.isFile() && f.name.startsWith("piper"))
+                    .forEach((f) => fs.chmodSync(path.resolve(f.parentPath ?? f.path, f.name), 0o755));
+            }
         }
     },
 };

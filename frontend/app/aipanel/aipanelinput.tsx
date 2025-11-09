@@ -4,14 +4,21 @@
 import { formatFileSizeError, isAcceptableFile, validateFileSize } from "@/app/aipanel/ai-utils";
 import { waveAIHasFocusWithin } from "@/app/aipanel/waveai-focus-utils";
 import { type WaveAIModel } from "@/app/aipanel/waveai-model";
+import { useVoiceInput } from "./useVoiceInput";
+import { useWakeWord } from "./useWakeWord";
+import { useSpeechSynthesis } from "./useSpeechSynthesis";
 import { cn } from "@/util/util";
 import { useAtom, useAtomValue } from "jotai";
-import { memo, useCallback, useEffect, useRef } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 interface AIPanelInputProps {
     onSubmit: (e: React.FormEvent) => void;
     status: string;
     model: WaveAIModel;
+    ttsEnabled: boolean;
+    setTtsEnabled: (enabled: boolean) => void;
+    isSpeaking: boolean;
+    stopSpeaking: () => void;
 }
 
 export interface AIPanelInputRef {
@@ -19,12 +26,27 @@ export interface AIPanelInputRef {
     resize: () => void;
 }
 
-export const AIPanelInput = memo(({ onSubmit, status, model }: AIPanelInputProps) => {
+export const AIPanelInput = memo(({ onSubmit, status, model, ttsEnabled, setTtsEnabled, isSpeaking, stopSpeaking }: AIPanelInputProps) => {
     const [input, setInput] = useAtom(model.inputAtom);
     const isFocused = useAtomValue(model.isWaveAIFocusedAtom);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const isPanelOpen = useAtomValue(model.getPanelVisibleAtom());
+    const { isListening, isConnecting, transcript, error: voiceError, startListening, stopListening, clearTranscript } = useVoiceInput();
+
+    // Wake word detection (always listening in background)
+    const {
+        isListening: wakeWordListening,
+        isActive: wakeWordActive,
+        error: wakeWordError,
+        startListening: startWakeWord,
+        stopListening: stopWakeWord,
+    } = useWakeWord(() => {
+        console.log("[AIPanelInput] Wake word detected, starting voice input");
+        if (!isListening) {
+            startListening();
+        }
+    });
 
     const resizeTextarea = useCallback(() => {
         const textarea = textareaRef.current;
@@ -76,6 +98,38 @@ export const AIPanelInput = memo(({ onSubmit, status, model }: AIPanelInputProps
         resizeTextarea();
     }, [input, resizeTextarea]);
 
+    // Update input with voice transcript
+    useEffect(() => {
+        if (transcript) {
+            setInput(transcript);
+        }
+    }, [transcript, setInput]);
+
+    // Show voice error if any
+    useEffect(() => {
+        if (voiceError) {
+            model.setError(voiceError);
+        }
+    }, [voiceError, model]);
+
+    // Handle voice auto-submit after silence
+    useEffect(() => {
+        const handleAutoSubmit = () => {
+            if (isListening && transcript) {
+                console.log("[AIPanelInput] Auto-submitting after silence");
+                stopListening();
+                // Submit the form
+                const form = document.querySelector('form');
+                if (form) {
+                    form.requestSubmit();
+                }
+            }
+        };
+
+        window.addEventListener("voice-auto-submit", handleAutoSubmit);
+        return () => window.removeEventListener("voice-auto-submit", handleAutoSubmit);
+    }, [isListening, transcript, stopListening]);
+
     useEffect(() => {
         if (isPanelOpen) {
             resizeTextarea();
@@ -108,6 +162,15 @@ export const AIPanelInput = memo(({ onSubmit, status, model }: AIPanelInputProps
 
         if (e.target) {
             e.target.value = "";
+        }
+    };
+
+    const handleVoiceClick = () => {
+        if (isListening) {
+            stopListening();
+        } else {
+            clearTranscript();
+            startListening();
         }
     };
 
@@ -146,6 +209,59 @@ export const AIPanelInput = memo(({ onSubmit, status, model }: AIPanelInputProps
                         )}
                     >
                         <i className="fa fa-paperclip text-xs"></i>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => (wakeWordListening ? stopWakeWord() : startWakeWord())}
+                        className={cn(
+                            "absolute bottom-6 right-13 w-3.5 h-3.5 transition-colors flex items-center justify-center cursor-pointer",
+                            wakeWordActive ? "text-green-500 hover:text-green-400" : "text-gray-400 hover:text-accent"
+                        )}
+                        title={wakeWordListening ? "Disable wake word detection" : "Enable wake word detection"}
+                    >
+                        <i className={cn("fa text-xs", wakeWordActive ? "fa-ear-listen" : "fa-magic")}></i>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            if (isSpeaking) {
+                                stopSpeaking();
+                            } else {
+                                setTtsEnabled(!ttsEnabled);
+                            }
+                        }}
+                        className={cn(
+                            "absolute bottom-6 right-9 w-3.5 h-3.5 transition-colors flex items-center justify-center cursor-pointer",
+                            isSpeaking
+                                ? "text-blue-500 hover:text-blue-400"
+                                : ttsEnabled
+                                  ? "text-blue-500 hover:text-blue-400"
+                                  : "text-gray-400 hover:text-accent"
+                        )}
+                        title={isSpeaking ? "Stop speaking" : ttsEnabled ? "Disable voice responses" : "Enable voice responses"}
+                    >
+                        {isSpeaking ? (
+                            <i className="fa fa-volume-high text-xs animate-pulse"></i>
+                        ) : (
+                            <i className={cn("fa text-xs", ttsEnabled ? "fa-volume-high" : "fa-volume-xmark")}></i>
+                        )}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleVoiceClick}
+                        disabled={isConnecting}
+                        className={cn(
+                            "absolute bottom-6 right-5 w-3.5 h-3.5 transition-colors flex items-center justify-center cursor-pointer",
+                            isListening ? "text-red-500 hover:text-red-400" : "text-gray-400 hover:text-accent",
+                            isConnecting && "opacity-50 cursor-wait"
+                        )}
+                        title={isListening ? "Stop listening" : "Start voice input"}
+                    >
+                        {isConnecting ? (
+                            <i className="fa fa-spinner fa-spin text-xs"></i>
+                        ) : (
+                            <i className={cn("fa text-xs", isListening ? "fa-stop-circle" : "fa-microphone")}></i>
+                        )}
                     </button>
                     <button
                         type="submit"

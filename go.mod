@@ -11,6 +11,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/emirpasic/gods v1.18.1
 	github.com/fsnotify/fsnotify v1.9.0
+	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20251101123828-999a7e0cbf84
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/golang-migrate/migrate/v4 v4.19.0
 	github.com/google/generative-ai-go v0.20.1

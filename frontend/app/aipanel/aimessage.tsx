@@ -117,7 +117,10 @@ const AIMessagePart = memo(({ part, role, isStreaming }: AIMessagePartProps) => 
     const model = WaveAIModel.getInstance();
 
     if (part.type === "text") {
-        const content = part.text ?? "";
+        let content = part.text ?? "";
+        
+        // Strip [[VERBAL]] tags to avoid React warning (they're only for TTS extraction)
+        content = content.replace(/\[\[VERBAL\]\][\s\S]*?\[\[\/VERBAL\]\]/g, "");
 
         if (role === "user") {
             return <div className="whitespace-pre-wrap break-words">{content}</div>;

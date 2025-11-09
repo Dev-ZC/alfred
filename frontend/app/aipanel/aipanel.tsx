@@ -22,6 +22,7 @@ import { AIPanelMessages } from "./aipanelmessages";
 import { AIRateLimitStrip } from "./airatelimitstrip";
 import { TelemetryRequiredMessage } from "./telemetryrequired";
 import { WaveAIModel } from "./waveai-model";
+import { useSpeechSynthesis } from "./useSpeechSynthesis";
 
 const AIBlockMask = memo(() => {
     return (
@@ -213,8 +214,12 @@ const AIPanelComponentInner = memo(() => {
     const isLayoutMode = jotai.useAtomValue(atoms.controlShiftDelayAtom);
     const showOverlayBlockNums = jotai.useAtomValue(getSettingsKeyAtom("app:showoverlayblocknums")) ?? true;
     const isFocused = jotai.useAtomValue(model.isWaveAIFocusedAtom);
-    const telemetryEnabled = jotai.useAtomValue(getSettingsKeyAtom("telemetry:enabled")) ?? false;
     const isPanelVisible = jotai.useAtomValue(model.getPanelVisibleAtom());
+
+    // TTS state
+    const { isSpeaking, speak, stopSpeaking } = useSpeechSynthesis();
+    const [ttsEnabled, setTtsEnabled] = useState(false);
+    const lastSpokenMessageId = useRef<string | null>(null);
 
     const { messages, sendMessage, status, setMessages, error, stop } = useChat({
         transport: new DefaultChatTransport({
@@ -292,6 +297,35 @@ const AIPanelComponentInner = memo(() => {
     useEffect(() => {
         model.ensureRateLimitSet();
     }, [model]);
+
+    // Auto-speak new assistant messages when TTS is enabled
+    useEffect(() => {
+        if (!ttsEnabled || !messages.length) {
+            return;
+        }
+
+        // Don't speak while streaming
+        if (status === "streaming") {
+            return;
+        }
+
+        // Find the last assistant message
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage.role === "assistant" && lastMessage.id !== lastSpokenMessageId.current) {
+            // Extract text from all text parts
+            const parts = lastMessage.parts || [];
+            const text = parts
+                .filter((p: any) => p.type === "text")
+                .map((p: any) => p.text || "")
+                .join("\n\n");
+            
+            if (text && text.trim()) {
+                console.log("[AI Panel] Auto-speaking response");
+                lastSpokenMessageId.current = lastMessage.id;
+                speak(text, true); // extractVerbal = true
+            }
+        }
+    }, [messages, ttsEnabled, status, speak]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -483,31 +517,33 @@ const AIPanelComponentInner = memo(() => {
             <AIRateLimitStrip />
 
             <div key="main-content" className="flex-1 flex flex-col min-h-0">
-                {!telemetryEnabled ? (
-                    <TelemetryRequiredMessage />
+                {messages.length === 0 && initialLoadDone ? (
+                    <div
+                        className="flex-1 overflow-y-auto p-2"
+                        onContextMenu={(e) => handleWaveAIContextMenu(e, true)}
+                    >
+                        {model.inBuilder ? <AIBuilderWelcomeMessage /> : <AIWelcomeMessage />}
+                    </div>
                 ) : (
-                    <>
-                        {messages.length === 0 && initialLoadDone ? (
-                            <div
-                                className="flex-1 overflow-y-auto p-2"
-                                onContextMenu={(e) => handleWaveAIContextMenu(e, true)}
-                            >
-                                {model.inBuilder ? <AIBuilderWelcomeMessage /> : <AIWelcomeMessage />}
-                            </div>
-                        ) : (
-                            <AIPanelMessages
-                                messages={messages}
-                                status={status}
-                                onContextMenu={(e) => handleWaveAIContextMenu(e, true)}
-                            />
-                        )}
-                        {errorMessage && (
-                            <AIErrorMessage errorMessage={errorMessage} onClear={() => model.clearError()} />
-                        )}
-                        <AIDroppedFiles model={model} />
-                        <AIPanelInput onSubmit={handleSubmit} status={status} model={model} />
-                    </>
+                    <AIPanelMessages
+                        messages={messages}
+                        status={status}
+                        onContextMenu={(e) => handleWaveAIContextMenu(e, true)}
+                    />
                 )}
+                {errorMessage && (
+                    <AIErrorMessage errorMessage={errorMessage} onClear={() => model.clearError()} />
+                )}
+                <AIDroppedFiles model={model} />
+                <AIPanelInput 
+                    onSubmit={handleSubmit} 
+                    status={status} 
+                    model={model}
+                    ttsEnabled={ttsEnabled}
+                    setTtsEnabled={setTtsEnabled}
+                    isSpeaking={isSpeaking}
+                    stopSpeaking={stopSpeaking}
+                />
             </div>
         </div>
     );

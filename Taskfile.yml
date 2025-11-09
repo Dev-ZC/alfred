@@ -129,6 +129,8 @@ tasks:
         cmds:
             - task: build:server
             - task: build:wsh
+        deps:
+            - whisper:build
 
     build:backend:quickdev:
         desc: Build only the wavesrv component for quickdev (arm64 macOS only, no generate, no wsh).
@@ -166,6 +168,7 @@ tasks:
         deps:
             - go:mod:tidy
             - generate
+            - whisper:build
         sources:
             - "cmd/server/*.go"
             - "pkg/**/*.go"
@@ -176,14 +179,15 @@ tasks:
             - dist/bin/wavesrv.*
 
     build:server:macos:
-        desc: Build the wavesrv component for macOS (Darwin) platforms (generates artifacts for both arm64 and amd64).
+        desc: Build the wavesrv component for macOS (Darwin) platforms (generates artifacts for current architecture only).
         platforms: [darwin]
         cmds:
             - cmd: "{{.RM}} dist/bin/wavesrv*"
               ignore_error: true
             - task: build:server:internal
               vars:
-                  ARCHS: arm64,amd64
+                  ARCHS:
+                      sh: echo {{if eq "arm" ARCH}}arm64{{else}}{{ARCH}}{{end}}
 
     build:server:quickdev:
         desc: Build the wavesrv component for quickdev (arm64 macOS only, no generate).
@@ -233,6 +237,9 @@ tasks:
         requires:
             vars:
                 - ARCHS
+        env:
+            C_INCLUDE_PATH: "{{.ROOT_DIR}}/third_party/whisper.cpp/include:{{.ROOT_DIR}}/third_party/whisper.cpp/ggml/include"
+            LIBRARY_PATH: "{{.ROOT_DIR}}/third_party/whisper.cpp/build_go/src:{{.ROOT_DIR}}/third_party/whisper.cpp/build_go:{{.ROOT_DIR}}/third_party/whisper.cpp/build_go/ggml/src:{{.ROOT_DIR}}/third_party/whisper.cpp/build_go/ggml/src/ggml-metal:{{.ROOT_DIR}}/third_party/whisper.cpp/build_go/ggml/src/ggml-blas"
         cmd:
             cmd: CGO_ENABLED=1 GOARCH={{.GOARCH}} {{.GO_ENV_VARS}} go build -tags "osusergo,sqlite_omit_load_extension" -ldflags "{{.GO_LDFLAGS}} -X main.BuildTime=$({{.DATE}} +'%Y%m%d%H%M') -X main.WaveVersion={{.VERSION}}" -o dist/bin/wavesrv.{{if eq .GOARCH "amd64"}}x64{{else}}{{.GOARCH}}{{end}}{{exeExt}} cmd/server/main-server.go
             for:
@@ -298,8 +305,17 @@ tasks:
                 - GOOS
                 - GOARCH
                 - VERSION
+        env:
+            C_INCLUDE_PATH: "{{.ROOT_DIR}}/third_party/whisper.cpp/include:{{.ROOT_DIR}}/third_party/whisper.cpp/ggml/include"
+            LIBRARY_PATH: "{{.ROOT_DIR}}/third_party/whisper.cpp/build_go/src:{{.ROOT_DIR}}/third_party/whisper.cpp/build_go:{{.ROOT_DIR}}/third_party/whisper.cpp/build_go/ggml/src:{{.ROOT_DIR}}/third_party/whisper.cpp/build_go/ggml/src/ggml-metal"
         cmd: (CGO_ENABLED=0 GOOS={{.GOOS}} GOARCH={{.GOARCH}} go build -ldflags="-s -w -X main.BuildTime=$({{.DATE}} +'%Y%m%d%H%M') -X main.WaveVersion={{.VERSION}}" -o dist/bin/wsh-{{.VERSION}}-{{.GOOS}}.{{.NORMALIZEDARCH}}{{.EXT}} cmd/wsh/main-wsh.go)
         internal: true
+
+    whisper:build:
+        desc: Build libwhisper.a for Go bindings (third_party/whisper.cpp)
+        dir: third_party/whisper.cpp/bindings/go
+        cmds:
+            - make whisper
 
     build:tsunamiscaffold:
         desc: Build and copy tsunami scaffold to dist directory.
